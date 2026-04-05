@@ -6,3 +6,9 @@ opencv-python-headless
 pillow
 pandas
 numpy
+tqdm
+seaborn
+matplotlib
+pyyaml
+requests
+psutil
