@@ -1,3 +1,12 @@
+import pathlib
+import platform
+
+# --- THIS MUST REMAIN AT THE VERY TOP (LINE 1-10) ---
+# We force the system to treat WindowsPath as PosixPath immediately.
+plt = platform.system()
+if plt != 'Windows':
+    pathlib.WindowsPath = pathlib.PosixPath
+
 import streamlit as st
 import torch
 import cv2
@@ -5,14 +14,6 @@ import numpy as np
 from PIL import Image
 import tempfile
 import os
-import pathlib
-import platform
-
-# --- THE FIX: MUST BE AT THE TOP ---
-# This forces Linux to understand Windows-style file paths saved in your model
-plt_system = platform.system()
-if plt_system != 'Windows':
-    pathlib.WindowsPath = pathlib.PosixPath
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="AI Shooting App", layout="wide")
@@ -21,13 +22,12 @@ st.title("🎯 AI Shooting Detector")
 # --- LOAD MODEL ---
 @st.cache_resource
 def load_model():
-    # 1. Check if the file actually exists on GitHub
     if not os.path.exists('best.pt'):
-        st.error("File 'best.pt' not found! Make sure it is in the root folder of your GitHub repo.")
+        st.error("CRITICAL: 'best.pt' not found in your GitHub repository root!")
         return None
     
     try:
-        # 2. Load model with trust_repo to allow YOLOv5 scripts to run
+        # Load the custom model
         model = torch.hub.load(
             'ultralytics/yolov5', 
             'custom', 
@@ -38,6 +38,7 @@ def load_model():
         return model
     except Exception as e:
         st.error(f"Model Load Error: {e}")
+        st.info("Tip: If you see 'WindowsPath' error still, please Reboot the app in the 'Manage App' menu.")
         return None
 
 model = load_model()
