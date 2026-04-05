@@ -2,140 +2,75 @@ import streamlit as st
 import torch
 import cv2
 import numpy as np
-import math
 from PIL import Image
+import tempfile
+import os
 
-# =========================
-# TITLE
-# =========================
-st.set_page_config(page_title="AI Shooting Scoring", layout="centered")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="AI Shooting App", layout="wide")
+st.title("🎯 AI Shooting Detector")
+st.write("Upload an image or video to detect targets using YOLOv5.")
 
-st.title("🎯 AI Smart Shooting Scoring System")
-st.write("Upload your shooting target image")
-
-# =========================
-# LOAD MODEL
-# =========================
+# --- LOAD MODEL ---
 @st.cache_resource
 def load_model():
+    # Loading the model from the local 'best.pt' file
+    # We use ultralytics/yolov5 as the base repository
     model = torch.hub.load(
-        'ultralytics/yolov5',
-        'custom',
-        path='best.pt',
-        trust_repo=True
+        'ultralytics/yolov5', 
+        'custom', 
+        path='best.pt', 
+        force_reload=True
     )
-    model.conf = 0.25
     return model
 
 model = load_model()
 
-# =========================
-# TARGET DETECTION
-# =========================
-def detect_target_contour(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5,5), 0)
-    edges = cv2.Canny(blur, 50, 150)
+# --- SIDEBAR ---
+st.sidebar.header("Settings")
+confidence = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.45)
 
-    contours, _ = cv2.findContours(
-        edges,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
+# --- UPLOAD SECTION ---
+source = st.radio("Select Source:", ("Image", "Video"))
+uploaded_file = st.file_uploader(f"Upload {source}", type=['jpg', 'jpeg', 'png', 'mp4', 'mov'])
 
-    if contours:
-        largest = max(contours, key=cv2.contourArea)
+if uploaded_file is not None:
+    if source == "Image":
+        # Process Image
+        img = Image.open(uploaded_file)
+        st.image(img, caption="Uploaded Image", use_container_width=True)
+        
+        if st.button("Run Detection"):
+            results = model(img)
+            results.render()  # updates results.ims with boxes and labels
+            
+            st.subheader("Detection Result")
+            st.image(results.ims[0], caption="Processed Image", use_container_width=True)
+            st.write(results.pandas().xyxy[0])  # Show table of detections
 
-        if cv2.contourArea(largest) > 5000:
-            x, y, w, h = cv2.boundingRect(largest)
-            cx = x + w // 2
-            cy = y + h // 2
-            radius = min(w, h) // 2
-            return (cx, cy, radius)
-
-    return None
-
-# =========================
-# PROCESS IMAGE
-# =========================
-def process_image(image):
-    frame = np.array(image)
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-    h, w = frame.shape[:2]
-
-    # ===== TARGET =====
-    target = detect_target_contour(frame)
-
-    if target:
-        cx, cy, R = target
-    else:
-        cx, cy = w//2, h//2
-        R = 200
-
-    center = (cx, cy)
-
-    # ===== RINGS =====
-    radii = [
-        int(R * 0.2),
-        int(R * 0.5),
-        int(R * 0.7),
-        int(R * 0.9),
-        int(R * 1.1)
-    ]
-
-    scores = [10, 8, 6, 4, 2]
-    colors = [(0,255,255),(255,0,255),(0,255,0),(0,128,255),(255,0,0)]
-
-    overlay = frame.copy()
-    for r, c in zip(radii, colors):
-        cv2.circle(overlay, center, r, c, -1)
-
-    frame = cv2.addWeighted(overlay, 0.3, frame, 0.7, 0)
-
-    # ===== YOLO =====
-    results = model(frame, size=1024)
-    detections = results.xyxy[0]
-
-    total_score = 0
-
-    for *box, conf, cls in detections:
-        x1, y1, x2, y2 = map(int, box)
-        bx, by = (x1+x2)//2, (y1+y2)//2
-
-        dist = math.hypot(bx-cx, by-cy)
-
-        score = 0
-        for r, s in zip(radii, scores):
-            if dist <= r:
-                score = s
+    elif source == "Video":
+        # Process Video
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_file.read())
+        vf = cv2.VideoCapture(tfile.name)
+        
+        st.write("Processing video... this may take a moment.")
+        st_frame = st.empty()
+        
+        while vf.isOpened():
+            ret, frame = vf.read()
+            if not ret:
                 break
-
-        total_score += score
-
-        cv2.circle(frame, (bx,by), 6, (0,255,0), -1)
-        cv2.putText(frame, str(score), (bx-10,by-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-
-    cv2.putText(frame, f"TOTAL: {total_score}", (20,40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,255,255), 3)
-
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    return frame, total_score
-
-# =========================
-# UPLOAD UI
-# =========================
-uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg","jpeg","png"])
-
-if uploaded_file:
-    image = Image.open(uploaded_file)
-
-    st.image(image, caption="Original Image")
-
-    if st.button("🚀 Process"):
-        result, score = process_image(image)
-
-        st.image(result, caption="Processed Result")
-        st.success(f"🎯 Total Score: {score}")
+                
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Inference
+            results = model(frame_rgb)
+            results.render()
+            
+            # Display frame
+            st_frame.image(results.ims[0], channels="RGB", use_container_width=True)
+        
+        vf.release()
+        os.remove(tfile.name)
