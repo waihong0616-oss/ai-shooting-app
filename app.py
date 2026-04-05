@@ -6,11 +6,12 @@ from PIL import Image
 import tempfile
 import os
 import pathlib
+import platform  # <--- Added this missing import
 
 # --- CRITICAL FIX FOR WINDOWS-TRAINED MODELS ---
 # This rebinds WindowsPath to PosixPath so the model can load on Linux/Streamlit Cloud
-plt = platform.system()
-if plt != 'Windows':
+plt_type = platform.system()
+if plt_type != 'Windows':
     pathlib.WindowsPath = pathlib.PosixPath
 
 # --- PAGE CONFIG ---
@@ -21,7 +22,7 @@ st.write("Upload an image or video to detect targets using your custom YOLOv5 mo
 # --- LOAD MODEL ---
 @st.cache_resource
 def load_model():
-    # Verify file exists to prevent generic loading errors
+    # Verify file exists
     if not os.path.exists('best.pt'):
         st.error("File 'best.pt' not found! Please ensure it is in the root of your GitHub repo.")
         return None
@@ -42,13 +43,12 @@ def load_model():
 
 model = load_model()
 
-# --- SIDEBAR SETTINGS ---
+# --- APP LOGIC ---
 if model is not None:
     st.sidebar.header("Detection Settings")
     conf_threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.45)
-    model.conf = conf_threshold  # Apply threshold to model
+    model.conf = conf_threshold 
 
-    # --- UPLOAD SECTION ---
     source = st.radio("Select Source:", ("Image", "Video"))
     uploaded_file = st.file_uploader(f"Upload {source}", type=['jpg', 'jpeg', 'png', 'mp4', 'mov'])
 
@@ -60,7 +60,7 @@ if model is not None:
             if st.button("Run Detection"):
                 with st.spinner("Detecting..."):
                     results = model(img_array)
-                    results.render()  # Draws bounding boxes on the image
+                    results.render() 
                     
                     st.subheader("Result")
                     st.image(results.ims[0], caption="Processed Image", use_container_width=True)
@@ -68,7 +68,6 @@ if model is not None:
                     st.dataframe(results.pandas().xyxy[0])
 
         elif source == "Video":
-            # Save uploaded video to a temporary file for OpenCV to read
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(uploaded_file.read())
             vf = cv2.VideoCapture(tfile.name)
@@ -81,17 +80,14 @@ if model is not None:
                 if not ret:
                     break
                 
-                # Convert BGR (OpenCV) to RGB (YOLO/Streamlit)
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Run Inference
                 results = model(frame_rgb)
                 results.render()
                 
-                # Display processed frame
                 st_frame.image(results.ims[0], channels="RGB", use_container_width=True)
             
             vf.release()
             os.remove(tfile.name)
+            st.success("Video processing complete!")
 else:
     st.warning("Model could not be loaded. Please check the logs in 'Manage app'.")
